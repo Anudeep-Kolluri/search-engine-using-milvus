@@ -1,2 +1,4 @@
-# search-engine-using-milvus
-A search engine created using milvus
+# Retrieval-engine-using-milvus
+A Retrieval engine created using milvus
+
+![Output](images/output.png)

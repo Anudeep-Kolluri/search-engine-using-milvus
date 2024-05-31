@@ -1,58 +1,81 @@
+import streamlit as st
+import tiktoken
+import os
 
-#-------------------------- COMMAND LINE ARGUMENTS -----------------------
-import argparse
+tokenizer = tiktoken.get_encoding("cl100k_base")
 
-parser = argparse.ArgumentParser(description='RAG search engine using Milvus')
-parser.add_argument('-o', '--overwrite', action='store_true', help='Overwrite the current database')
-parser.add_argument('-r', '--reload', action='store_true', help="Reload data folder and re-read the embeddings [EXPENSIVE]")
-
-args = parser.parse_args()
-
-#------------------------ HANDING VECTOR STORE ---------------------------
-
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.milvus import MilvusVectorStore
-from llama_index.core import StorageContext
+from llama_index.core import VectorStoreIndex, StorageContext
+from llama_index.core import SimpleDirectoryReader
 
-DB_NAME = "test.db"
+UPLOAD_DIR = "data"
 
-embedding_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-# embedding_dim = embedding_model.embedding_dimension
-
+DB_NAME = "Milvus.db"
+DIM = 1536
 
 vector_store = MilvusVectorStore(
     uri = DB_NAME,
-    dim = 1536,
-    overwrite=args.overwrite
-    )
+    dim = DIM,
+    overwrite=True   # Need to change accordingly
+)
 
-storage_context = StorageContext.from_defaults(vector_store = vector_store)
+storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-#---------------------- GETTING THE EMBEDDINGS ---------------------------
-from llama_index.core import SimpleDirectoryReader
-from llama_index.core import VectorStoreIndex, StorageContext
+def save_uploaded_file(uploaded_file):
+    file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return file_path
 
-if args.overwrite or args.reload:
-    documents = SimpleDirectoryReader("./test_data").load_data()
-    index = VectorStoreIndex.from_documents(
-        documents,
-        storage_context=storage_context
-    )
-    print("Data Loaded successfully into the Database")
-else:
-    index = VectorStoreIndex.from_vector_store(
-        vector_store=vector_store
-    )
+def main():
+    st.title("Retrieval Engine App")
 
-#----------------------- QUERY ------------------------
-# query_engine = index.as_query_engine(llm = None)
-# response = query_engine.query("What model are you using?", llm = None)
+    os.environ['OPENAI_API_KEY'] = st.sidebar.text_input("Openai API key", type = "password")
+    
+    # Sidebar for file uploads
+    st.sidebar.title("Upload Files")
+    uploaded_files = st.sidebar.file_uploader("Drop files here to retrieve from", accept_multiple_files=True)
+    
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            save_uploaded_file(uploaded_file)
 
-# print(response)
+        st.toast("Files uploaded successfully")
 
+        documents = SimpleDirectoryReader(UPLOAD_DIR).load_data()
+        text = "\n".join([doc.text for doc in documents])
 
-query = "What are transformers"
-query_engine = index.as_retriever()
-results = query_engine.retrieve(query)
+        tokens = tokenizer.encode(text)
+        st.sidebar.write(f"**Tokens : {len(tokens)}**")
 
-print(results)
+        if st.sidebar.button("Create Index"):
+            st.sidebar.success("Index Created")
+
+    # Initialize query_engine in session state if it doesn't exist
+    if "query_engine" not in st.session_state:
+        st.session_state.query_engine = None
+
+    # Search bar
+    search_query = st.text_input("Enter your search query")
+    
+    # Search button
+    if st.button("Search"):
+        if search_query:
+            index = VectorStoreIndex.from_documents(
+                documents,
+                storage_context=storage_context
+            )
+            query_engine = index.as_retriever()
+            results = query_engine.retrieve(search_query)
+            print(results)
+            display_results(results)
+        else:
+            st.warning("Please enter a search query")
+
+def display_results(results):
+    st.subheader("Top Results")
+    for idx, result in enumerate(results):
+        st.write(f"{idx + 1}. {result}")
+
+if __name__ == "__main__":
+    main()
